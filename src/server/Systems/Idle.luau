@@ -8,6 +8,7 @@ local Creatures = require(Shared.GameData.Creatures)
 local Economy = require(Shared.Economy)
 local Format = require(Shared.Util.Format)
 local Rarities = require(Shared.GameData.Rarities)
+local Variants = require(Shared.GameData.Variants)
 local Types = require(Shared.Types)
 local Net = require(script.Parent.Parent.Lib.Net)
 local PlayerData = require(script.Parent.PlayerData)
@@ -43,7 +44,7 @@ function Idle.incubatorFull(profile: Profile): boolean
 	return #profile.eggs >= Config.INCUBATOR_SLOTS
 end
 
-function Idle.addEgg(profile: Profile, tier: number, kind: Types.EggKind)
+function Idle.addEgg(profile: Profile, tier: number, kind: Types.EggKind, luck: number?)
 	local def = Creatures.get(tier)
 	assert(def, "bad tier")
 	local r = Rarities[def.rarity]
@@ -55,6 +56,7 @@ function Idle.addEgg(profile: Profile, tier: number, kind: Types.EggKind)
 		rarity = def.rarity,
 		startedAt = now,
 		hatchAt = now + rng:NextInteger(r.hatchMin, r.hatchMax),
+		luck = luck or 1,
 	})
 end
 
@@ -98,22 +100,25 @@ local function tickProfile(player: Player, profile: Profile, now: number): boole
 			end
 			local name =
 				`{PET_NAMES[rng:NextInteger(1, #PET_NAMES)]} the {if def then def.name else "Fish"}`
-			table.insert(profile.pets, {
+			local pet: Types.Pet = {
 				id = PlayerData.newId(profile),
 				tier = egg.tier,
 				kind = egg.kind,
 				rarity = egg.rarity,
 				name = name,
+				variant = egg.variant or Variants.roll(rng, egg.luck or 1),
 				placed = placed,
 				feedReadyAt = 0,
 				pendingUnits = 0,
-			})
-			profile.dex[`{egg.tier}:{egg.kind}`] = true
-			Net.notify(
-				player,
-				`🐣 {name} hatched! ({egg.kind}{if placed then "" else " — no free slot, stored"})`,
-				"success"
-			)
+			}
+			table.insert(profile.pets, pet)
+			local dexKey = `{egg.tier}:{egg.kind}`
+			local isNew = not profile.dex[dexKey]
+			profile.dex[dexKey] = true
+			Net.hatched(player, pet, isNew)
+			if not placed then
+				Net.notify(player, `{name} is stored — your {egg.kind} slots are full`, "warn")
+			end
 			changed = true
 		end
 	end
@@ -188,7 +193,7 @@ local function feedPet(player: Player, petId: unknown)
 	end
 	profile.coins -= r.feedCost
 	pet.feedReadyAt = os.time() + r.productionSeconds
-	pet.pendingUnits = r.caviarUnits
+	pet.pendingUnits = Economy.caviarUnits(pet)
 	PlayerData.changed(player)
 end
 

@@ -5,15 +5,24 @@ local Config = require(script.Parent.Config)
 local Rarities = require(script.Parent.GameData.Rarities)
 local Shop = require(script.Parent.GameData.Shop)
 local Types = require(script.Parent.Types)
+local Variants = require(script.Parent.GameData.Variants)
 
 local Economy = {}
+
+function Economy.petIncomePerHour(pet: Types.Pet): number
+	local r = Rarities[pet.rarity]
+	return r.visitorsPerHour * r.coinsPerVisitor * Variants.get(pet.variant).multiplier
+end
+
+function Economy.caviarUnits(pet: Types.Pet): number
+	return Rarities[pet.rarity].caviarUnits * Variants.get(pet.variant).multiplier
+end
 
 function Economy.aquariumRatePerSecond(profile: Types.PlayerProfile): number
 	local perHour = 0
 	for _, pet in profile.pets do
 		if pet.kind == "Aquarium" and pet.placed then
-			local r = Rarities[pet.rarity]
-			perHour += r.visitorsPerHour * r.coinsPerVisitor
+			perHour += Economy.petIncomePerHour(pet)
 		end
 	end
 	return perHour / 3600

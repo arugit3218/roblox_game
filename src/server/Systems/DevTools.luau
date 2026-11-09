@@ -61,6 +61,26 @@ local commands: { [string]: (Player, any) -> any } = {
 		PlayerData.changed(player)
 		return true
 	end,
+	pet = function(player, spec)
+		-- spec = "tier:Kind:Variant", e.g. "3:Aquarium:Golden" — hatches next tick
+		local profile = assert(PlayerData.get(player))
+		local tierText, kind, variant = string.match(tostring(spec), "^(%d+):(%a+):(%a+)$")
+		local tier = tonumber(tierText)
+		if not tier or (kind ~= "Aquarium" and kind ~= "Caviar") then
+			return "usage: pet <tier>:<Aquarium|Caviar>:<Normal|Golden|Rainbow>"
+		end
+		Idle.addEgg(profile, tier, kind :: any)
+		local egg = profile.eggs[#profile.eggs]
+		egg.hatchAt = os.time()
+		egg.variant = variant
+		PlayerData.changed(player)
+		return true
+	end,
+	event = function()
+		-- Start the Golden Current now.
+		workspace:SetAttribute("NextEventAt", workspace:GetServerTimeNow() + 1)
+		return true
+	end,
 	tier = function(player, tier)
 		local profile = assert(PlayerData.get(player))
 		profile.highestTier = tonumber(tier) or 5

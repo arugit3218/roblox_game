@@ -14,6 +14,7 @@ local Economy = require(Shared.Economy)
 local Format = require(Shared.Util.Format)
 local Types = require(Shared.Types)
 local Net = require(script.Parent.Parent.Lib.Net)
+local Events = require(script.Parent.Events)
 local Idle = require(script.Parent.Idle)
 local PlayerData = require(script.Parent.PlayerData)
 local World = require(script.Parent.World)
@@ -26,6 +27,9 @@ type Chase = {
 	carried: BasePart,
 	started: number,
 	connection: RBXScriptConnection?,
+	reactionDelay: number,
+	luck: number,
+	rewardMult: number,
 	lastSamplePos: Vector3,
 	lastSampleTime: number,
 }
@@ -65,14 +69,15 @@ local function endChase(chase: Chase, success: boolean, reason: string?)
 
 	if success then
 		local def = chase.nest.def
-		Idle.addEgg(profile, def.tier, chase.kind)
-		profile.coins += def.reward
+		local reward = def.reward * chase.rewardMult
+		Idle.addEgg(profile, def.tier, chase.kind, chase.luck)
+		profile.coins += reward
 		profile.heists += 1
 		profile.highestTier = math.max(profile.highestTier, def.tier)
 		Net.notify(
 			player,
-			`🥚 Heist success! {chase.kind} Egg from the {def.name} is incubating. +{Format.number(
-				def.reward
+			`🥚 Egg secured! {chase.kind} Egg from the {def.name} is incubating. +{Format.number(
+				reward
 			)} coins`,
 			"success"
 		)
@@ -144,6 +149,8 @@ local function onStealTriggered(player: Player, nest: World.Nest)
 	chaser.Parent = workspace
 
 	local now = os.clock()
+	local wasAsleep = nest.asleep
+	World.setAsleep(nest, false) -- the thief wakes it up
 	local chase: Chase = {
 		player = player,
 		nest = nest,
@@ -152,12 +159,22 @@ local function onStealTriggered(player: Player, nest: World.Nest)
 		carried = attachCarriedEgg(player, kind, root),
 		started = now,
 		connection = nil,
+		reactionDelay = Config.CHASE_REACTION_DELAY
+			+ (if wasAsleep then Config.SLEEP_BONUS_DELAY else 0),
+		luck = Events.luck(),
+		rewardMult = Events.rewardMultiplier(),
 		lastSamplePos = root.Position,
 		lastSampleTime = now,
 	}
 	chases[player] = chase
 	PlayerData.setCarrying(player, { tier = def.tier, kind = kind })
-	Net.notify(player, `🏃 You grabbed the {kind} Egg! Get back across the glowing line!`, "warn")
+	Net.notify(
+		player,
+		if wasAsleep
+			then `😴 Sneaky! The {def.name} was asleep — head start! RUN!`
+			else `🏃 You grabbed the {kind} Egg! Get back to the SAFE ZONE!`,
+		"warn"
+	)
 
 	local speed = Creatures.speedOf(def)
 	local catchDistance = Config.CATCH_DISTANCE + def.size * 0.5
@@ -195,7 +212,7 @@ local function onStealTriggered(player: Player, nest: World.Nest)
 			endChase(chase, false, "⏱ The creature reclaimed its egg!")
 			return
 		end
-		if t - chase.started < Config.CHASE_REACTION_DELAY or speed <= 0 then
+		if t - chase.started < chase.reactionDelay or speed <= 0 then
 			return
 		end
 
@@ -217,7 +234,22 @@ local function rerollEggs()
 	end
 end
 
+-- Each nest's guardian naps on its own random rhythm.
+local function sleepCycle(nest: World.Nest)
+	local rng = Random.new()
+	task.wait(rng:NextNumber(0, 8))
+	while true do
+		World.setAsleep(nest, true)
+		task.wait(rng:NextNumber(Config.SLEEP_SECONDS[1], Config.SLEEP_SECONDS[2]))
+		World.setAsleep(nest, false)
+		task.wait(rng:NextNumber(Config.AWAKE_SECONDS[1], Config.AWAKE_SECONDS[2]))
+	end
+end
+
 function Heist.start()
+	for _, nest in World.nests do
+		task.spawn(sleepCycle, nest)
+	end
 	for _, nest in World.nests do
 		nest.prompt.Triggered:Connect(function(player)
 			onStealTriggered(player, nest)

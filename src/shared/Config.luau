@@ -27,4 +27,15 @@ return table.freeze({
 	STEAL_REACH = 14,
 	HEIST_MAX_Y = 40, -- carrying an egg above this height fails the heist (anti-fly)
 	EGG_REROLL_SECONDS = 30,
+
+	-- Sleeping creatures: steal while asleep for a head start.
+	SLEEP_SECONDS = { 10, 18 },
+	AWAKE_SECONDS = { 8, 14 },
+	SLEEP_BONUS_DELAY = 1.6,
+
+	-- Server-wide "Golden Current" event: boosted variant luck + double heist coins.
+	EVENT_INTERVAL = 10 * 60,
+	EVENT_DURATION = 3 * 60,
+	EVENT_LUCK = 3,
+	EVENT_REWARD_MULT = 2,
 })

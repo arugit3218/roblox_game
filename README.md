@@ -27,11 +27,14 @@ temporary profile (a warning shows bottom-left) and nothing saves.
   - `Systems/Heist` — steal → chase → escape/caught (server-authoritative)
   - `Systems/Idle` — incubation, aquarium income, caviar feeding, orders
   - `Systems/Shop` — speed upgrades, trails
+  - `Systems/Events` — server-wide Golden Current event timer
   - `Systems/DevTools` — Studio-only test commands
   - `Lib/Net` — remotes + per-action rate limiting
 - `src/client` → StarterPlayerScripts/Client
   - `Controllers/Hud` — top bar, toasts, heist banner
-  - `Controllers/Menus` — Eggs, Aquarium, Kitchen, Shop panels
+  - `Controllers/Menus` — Eggs, Aquarium, Kitchen, Shop, Index panels
+  - `Controllers/Guide` — floor arrows to the next nest / safe zone
+  - `Controllers/HatchReveal` — pet reveal card on hatch
 
 ## Studio test commands
 
@@ -44,6 +47,8 @@ D:Invoke("egg", nil, "3:Caviar")     -- give an egg (tier:Aquarium|Caviar)
 D:Invoke("skip")                     -- finish all hatch / caviar timers
 D:Invoke("elapse", nil, 3600)        -- pretend 1h passed for aquarium income
 D:Invoke("tier", nil, 5)             -- set highest tier stolen
+D:Invoke("pet", nil, "2:Aquarium:Golden") -- instant pet (Normal|Golden|Rainbow)
+D:Invoke("event")                    -- start the Golden Current event now
 ```
 
 ## Checks

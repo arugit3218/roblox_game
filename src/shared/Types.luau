@@ -12,6 +12,8 @@ export type Egg = {
 	rarity: Rarity,
 	startedAt: number,
 	hatchAt: number,
+	luck: number?, -- variant luck multiplier rolled at hatch (event eggs = higher)
+	variant: string?, -- forced variant (QA only); normally rolled at hatch
 }
 
 export type Pet = {
@@ -20,6 +22,7 @@ export type Pet = {
 	kind: EggKind,
 	rarity: Rarity,
 	name: string,
+	variant: string?, -- "Normal" | "Golden" | "Rainbow" (nil on old saves = Normal)
 	placed: boolean,
 	feedReadyAt: number, -- 0 = idle; otherwise caviar is ready at this time
 	pendingUnits: number,

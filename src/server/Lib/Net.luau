@@ -18,6 +18,7 @@ end
 local Request = makeEvent("Request") -- client -> server: (action: string, ...args)
 local State = makeEvent("State") -- server -> client: Snapshot
 local Notify = makeEvent("Notify") -- server -> client: (text: string, kind: string)
+local Hatched = makeEvent("Hatched") -- server -> client: (pet, isNewDex: boolean)
 folder.Parent = ReplicatedStorage
 
 type Handler = (player: Player, ...unknown) -> ()
@@ -78,6 +79,14 @@ end
 
 function Net.notify(player: Player, text: string, kind: string?)
 	Notify:FireClient(player, text, kind or "info")
+end
+
+function Net.hatched(player: Player, pet: any, isNew: boolean)
+	Hatched:FireClient(player, pet, isNew)
+end
+
+function Net.notifyAll(text: string, kind: string?)
+	Notify:FireAllClients(text, kind or "info")
 end
 
 -- Validators -----------------------------------------------------------------

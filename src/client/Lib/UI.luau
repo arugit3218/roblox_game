@@ -36,10 +36,36 @@ function UI.new(className: string, props: { [string]: any }, children: { Instanc
 end
 
 function UI.corner(radius: number?): UICorner
+	-- Scales a ScreenGui with screen height so HUD/menus fit phones and small windows.
+	function UI.autoScale(gui: ScreenGui, designHeight: number?)
+		local scale = Instance.new("UIScale")
+		scale.Parent = gui
+		local camera = workspace.CurrentCamera
+		local function update()
+			local h = camera.ViewportSize.Y
+			scale.Scale = math.clamp(h / (designHeight or 900), 0.55, 1.15)
+		end
+		update()
+		camera:GetPropertyChangedSignal("ViewportSize"):Connect(update)
+	end
+
 	return UI.new("UICorner", { CornerRadius = UDim.new(0, radius or 10) })
 end
 
 function UI.padding(px: number): UIPadding
+	-- Scales a ScreenGui with screen height so HUD/menus fit phones and small windows.
+	function UI.autoScale(gui: ScreenGui, designHeight: number?)
+		local scale = Instance.new("UIScale")
+		scale.Parent = gui
+		local camera = workspace.CurrentCamera
+		local function update()
+			local h = camera.ViewportSize.Y
+			scale.Scale = math.clamp(h / (designHeight or 900), 0.55, 1.15)
+		end
+		update()
+		camera:GetPropertyChangedSignal("ViewportSize"):Connect(update)
+	end
+
 	return UI.new("UIPadding", {
 		PaddingTop = UDim.new(0, px),
 		PaddingBottom = UDim.new(0, px),
@@ -94,6 +120,19 @@ function UI.button(
 		button.Activated:Connect(onClick)
 	end
 	return button
+end
+
+-- Scales a ScreenGui with screen height so HUD/menus fit phones and small windows.
+function UI.autoScale(gui: ScreenGui, designHeight: number?)
+	local scale = Instance.new("UIScale")
+	scale.Parent = gui
+	local camera = workspace.CurrentCamera
+	local function update()
+		local h = camera.ViewportSize.Y
+		scale.Scale = math.clamp(h / (designHeight or 900), 0.55, 1.15)
+	end
+	update()
+	camera:GetPropertyChangedSignal("ViewportSize"):Connect(update)
 end
 
 return UI

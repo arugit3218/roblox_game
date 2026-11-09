@@ -1,6 +1,7 @@
 --!strict
--- Side menu + panels: Eggs, Aquarium, Kitchen (caviar + orders), Shop.
+-- Right-side icon buttons + panels: Eggs, Aquarium, Kitchen (caviar + orders), Shop, Index.
 -- Panels only render state and send requests; the server validates everything.
+-- Panels rebuild only when state changes; countdown labels tick in place.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -11,6 +12,7 @@ local Creatures = require(Shared.GameData.Creatures)
 local Economy = require(Shared.Economy)
 local Format = require(Shared.Util.Format)
 local Rarities = require(Shared.GameData.Rarities)
+local Variants = require(Shared.GameData.Variants)
 local Shop = require(Shared.GameData.Shop)
 local Types = require(Shared.Types)
 local State = require(script.Parent.Parent.Lib.State)
@@ -26,10 +28,20 @@ local title: TextLabel
 local content: ScrollingFrame
 local current: string? = nil
 local rowCount = 0
+local aquariumBadge: TextLabel
+
+-- Countdown labels updated in place every 0.5s (no panel rebuild).
+type Timer = { label: TextLabel, endsAt: number, format: (number) -> string }
+local timers: { Timer } = {}
 
 local function rarityText(rarity: string): string
 	local def = (Rarities :: any)[rarity]
 	return if def then `<font color='#{def.color:ToHex()}'>{rarity}</font>` else rarity
+end
+
+local function variantText(pet: Types.Pet): string
+	local v = Variants.get(pet.variant)
+	return if v.name == "Normal" then "" else `<font color='#{v.color:ToHex()}'>{v.label}</font> `
 end
 
 local function clear()
@@ -39,6 +51,7 @@ local function clear()
 		end
 	end
 	rowCount = 0
+	table.clear(timers)
 end
 
 local function heading(text: string)
@@ -62,7 +75,12 @@ local function note(text: string)
 end
 
 -- A row with descriptive text and an optional action button.
-local function row(text: string, buttonText: string?, buttonColor: Color3?, onClick: (() -> ())?)
+local function row(
+	text: string,
+	buttonText: string?,
+	buttonColor: Color3?,
+	onClick: (() -> ())?
+): TextButton?
 	rowCount += 1
 	local frame = UI.new("Frame", {
 		Size = UDim2.new(1, 0, 0, 46),
@@ -81,12 +99,20 @@ local function row(text: string, buttonText: string?, buttonColor: Color3?, onCl
 			Size = UDim2.new(0.32, 0, 1, 0),
 		})
 		b.Parent = frame
+		return b
+	end
+	return nil
+end
+
+local function countdown(button: TextButton?, endsAt: number, format: (number) -> string)
+	if button then
+		table.insert(timers, { label = button :: any, endsAt = endsAt, format = format })
 	end
 end
 
 -- Panels ---------------------------------------------------------------------
 
-local function renderEggs(profile: Profile, now: number)
+local function renderEggs(profile: Profile, _now: number)
 	heading(`Incubator ({#profile.eggs}/{Config.INCUBATOR_SLOTS})`)
 	if #profile.eggs == 0 then
 		note("No eggs yet. Head to the Heist Field and steal one!")
@@ -98,13 +124,15 @@ local function renderEggs(profile: Profile, now: number)
 	for _, egg in eggs do
 		local def = Creatures.get(egg.tier)
 		local icon = if egg.kind == "Aquarium" then "🏠" else "🍽"
-		local remaining = egg.hatchAt - now
-		row(
+		local b = row(
 			`{icon} {if def then def.name else "?"} {egg.kind} Egg · {rarityText(egg.rarity)}`,
-			if remaining > 0 then `⏳ {Format.duration(remaining)}` else "🐣 Hatching…",
+			"",
 			UI.colors.disabled,
 			nil
 		)
+		countdown(b, egg.hatchAt, function(remaining)
+			return if remaining > 0 then `⏳ {Format.duration(remaining)}` else "🐣 Hatching…"
+		end)
 	end
 	heading("Pokedex")
 	local dexCount = 0
@@ -114,28 +142,26 @@ local function renderEggs(profile: Profile, now: number)
 	note(`Discovered {dexCount} of 50 pets (25 creatures × Aquarium/Caviar)`)
 end
 
-local function renderAquarium(profile: Profile, now: number)
+local function renderAquarium(profile: Profile, _now: number)
 	local rate = Economy.aquariumRatePerSecond(profile) * 3600
-	local pending = Economy.aquariumPending(profile, now)
 	heading("Visitor income")
-	row(
-		`🐠 {Format.number(rate)} coins/hour · <b>{Format.number(pending)}</b> ready`,
-		"Collect",
-		UI.colors.good,
-		function()
-			State.request("CollectAquarium")
-		end
-	)
+	local b = row(`🐠 {Format.number(rate)} coins/hour`, "Collect", UI.colors.good, function()
+		State.request("CollectAquarium")
+	end)
+	countdown(b, 0, function()
+		local snap = State.snapshot
+		local amount = if snap then Economy.aquariumPending(snap.profile, State.now()) else 0
+		return `Collect 💰{Format.number(amount)}`
+	end)
 	note("Income keeps building while you're offline (up to 12 hours).")
 	heading(`Display pets ({Economy.countPlaced(profile, "Aquarium")}/{Config.AQUARIUM_SLOTS})`)
 	local any = false
 	for _, pet in profile.pets do
 		if pet.kind == "Aquarium" then
 			any = true
-			local r = Rarities[pet.rarity]
 			row(
-				`{pet.name} · {rarityText(pet.rarity)}`,
-				if pet.placed then `{r.visitorsPerHour * r.coinsPerVisitor}/hr` else "Stored",
+				`{variantText(pet)}{pet.name} · {rarityText(pet.rarity)}`,
+				if pet.placed then `{Format.number(Economy.petIncomePerHour(pet))}/hr` else "Stored",
 				UI.colors.disabled,
 				nil
 			)
@@ -146,7 +172,7 @@ local function renderAquarium(profile: Profile, now: number)
 	end
 end
 
-local function renderKitchen(profile: Profile, now: number)
+local function renderKitchen(profile: Profile, _now: number)
 	heading("Caviar stock")
 	local stock = {}
 	for _, rarity in { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic" } do
@@ -168,16 +194,21 @@ local function renderKitchen(profile: Profile, now: number)
 			if not pet.placed then
 				row(`{pet.name} · {rarityText(pet.rarity)}`, "Stored", UI.colors.disabled, nil)
 			elseif pet.feedReadyAt > 0 then
-				row(
+				local b = row(
 					`{pet.name} · making {pet.pendingUnits} caviar`,
-					`🍳 {Format.duration(pet.feedReadyAt - now)}`,
+					"",
 					UI.colors.disabled,
 					nil
 				)
+				countdown(b, pet.feedReadyAt, function(remaining)
+					return `🍳 {Format.duration(remaining)}`
+				end)
 			else
 				local affordable = profile.coins >= r.feedCost
 				row(
-					`{pet.name} · {rarityText(pet.rarity)} → {r.caviarUnits} caviar`,
+					`{variantText(pet)}{pet.name} · {rarityText(pet.rarity)} → {Economy.caviarUnits(
+						pet
+					)} caviar`,
 					`Feed 💰{Format.number(r.feedCost)}`,
 					if affordable then UI.colors.warn else UI.colors.disabled,
 					function()
@@ -268,6 +299,65 @@ local function renderShop(profile: Profile)
 	end
 end
 
+local function renderIndex(profile: Profile)
+	local found = 0
+	for _ in profile.dex do
+		found += 1
+	end
+	heading(`Index · {found}/50 discovered`)
+	note("Steal both an 🏠 Aquarium and a 🍽 Caviar egg from every creature!")
+	rowCount += 1
+	local grid = UI.new("Frame", {
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+		LayoutOrder = rowCount,
+		Parent = content,
+	}, {
+		UI.new("UIGridLayout", {
+			CellSize = UDim2.new(0.2, -6, 0, 74),
+			CellPadding = UDim2.new(0, 6, 0, 6),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	})
+	for _, def in Creatures.list do
+		local aq = profile.dex[`{def.tier}:Aquarium`] == true
+		local cv = profile.dex[`{def.tier}:Caviar`] == true
+		local live = def.tier <= Config.MAX_TIER
+		local seen = aq or cv
+		local card = UI.new("Frame", {
+			BackgroundColor3 = if seen then UI.colors.panelLight else UI.colors.disabled,
+			LayoutOrder = def.tier,
+			Parent = grid,
+		}, {
+			UI.corner(8),
+			UI.padding(4),
+			UI.new(
+				"UIStroke",
+				{ Color = Rarities[def.rarity].color, Thickness = if seen then 2 else 0 }
+			),
+		})
+		UI.label(if seen then def.name else (if live then "???" else "🔒 Soon"), {
+			Size = UDim2.new(1, 0, 0.45, 0),
+			TextXAlignment = Enum.TextXAlignment.Center,
+			Parent = card,
+		})
+		UI.label(`T{def.tier} · {rarityText(def.rarity)}`, {
+			Position = UDim2.new(0, 0, 0.42, 0),
+			Size = UDim2.new(1, 0, 0.28, 0),
+			TextXAlignment = Enum.TextXAlignment.Center,
+			TextColor3 = UI.colors.muted,
+			Parent = card,
+		})
+		UI.label(`{if aq then "🏠" else "▫️"} {if cv then "🍽" else "▫️"}`, {
+			Position = UDim2.new(0, 0, 0.7, 0),
+			Size = UDim2.new(1, 0, 0.3, 0),
+			TextXAlignment = Enum.TextXAlignment.Center,
+			Parent = card,
+		})
+	end
+end
+
 local RENDERERS: { [string]: (Profile, number) -> () } = {
 	Eggs = renderEggs,
 	Aquarium = renderAquarium,
@@ -275,7 +365,25 @@ local RENDERERS: { [string]: (Profile, number) -> () } = {
 	Shop = function(profile)
 		renderShop(profile)
 	end,
+	Index = function(profile)
+		renderIndex(profile)
+	end,
 }
+
+local function tickTimers()
+	local now = State.now()
+	for _, t in timers do
+		if t.label.Parent then
+			t.label.Text = t.format(t.endsAt - now)
+		end
+	end
+	local snap = State.snapshot
+	if snap and aquariumBadge then
+		local pending = math.floor(Economy.aquariumPending(snap.profile, now))
+		aquariumBadge.Visible = pending > 0
+		aquariumBadge.Text = `+{Format.number(pending)}`
+	end
+end
 
 local function render()
 	if not current or not State.snapshot then
@@ -285,6 +393,7 @@ local function render()
 	clear()
 	RENDERERS[current](State.snapshot.profile, State.now())
 	content.CanvasPosition = scroll
+	tickTimers()
 end
 
 local function open(name: string)
@@ -307,12 +416,13 @@ function Menus.init()
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 		Parent = Players.LocalPlayer:WaitForChild("PlayerGui"),
 	})
+	UI.autoScale(gui)
 
 	local side = UI.new("Frame", {
 		Name = "Side",
-		AnchorPoint = Vector2.new(0, 0.5),
-		Position = UDim2.new(0, 10, 0.5, 0),
-		Size = UDim2.new(0, 120, 0, 4 * 54),
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -12, 0.5, 0),
+		Size = UDim2.new(0, 84, 0, 5 * 92),
 		BackgroundTransparency = 1,
 		Parent = gui,
 	}, {
@@ -321,24 +431,61 @@ function Menus.init()
 			{ Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }
 		),
 	})
-	for i, entry in
-		{
-			{ "Eggs", "🥚 Eggs" },
-			{ "Aquarium", "🐠 Aquarium" },
-			{ "Kitchen", "🍽 Kitchen" },
-			{ "Shop", "🛒 Shop" },
-		}
-	do
-		local b = UI.button(entry[2], UI.colors.panel, function()
-			open(entry[1])
-		end, { Name = entry[1] .. "Button", Size = UDim2.new(1, 0, 0, 46), LayoutOrder = i })
-		UI.new("UIStroke", {
-			Color = UI.colors.accent,
-			Thickness = 2,
-			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+	local entries = {
+		{ "Eggs", "🥚", "Eggs", Color3.fromRGB(240, 90, 90) },
+		{ "Aquarium", "🐠", "Aquarium", Color3.fromRGB(60, 170, 240) },
+		{ "Kitchen", "🍽", "Kitchen", Color3.fromRGB(250, 150, 50) },
+		{ "Shop", "🛒", "Shop", Color3.fromRGB(80, 200, 110) },
+		{ "Index", "📖", "Index", Color3.fromRGB(160, 100, 240) },
+	}
+	for i, entry in entries do
+		local b = UI.new("TextButton", {
+			Name = entry[1] .. "Button",
+			Size = UDim2.new(1, 0, 0, 84),
+			BackgroundColor3 = entry[4],
+			Text = "",
+			AutoButtonColor = true,
+			LayoutOrder = i,
+			Parent = side,
+		}, {
+			UI.corner(14),
+			UI.new("UIStroke", {
+				Color = Color3.new(1, 1, 1),
+				Thickness = 3,
+				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+			}),
+		})
+		UI.label(entry[2], {
+			Size = UDim2.new(1, 0, 0.66, 0),
+			TextXAlignment = Enum.TextXAlignment.Center,
 			Parent = b,
 		})
-		b.Parent = side
+			:FindFirstChildOfClass("UITextSizeConstraint").MaxTextSize =
+			44
+		local caption = UI.label(entry[3], {
+			Position = UDim2.new(0, 0, 0.62, 0),
+			Size = UDim2.new(1, 0, 0.34, 0),
+			TextXAlignment = Enum.TextXAlignment.Center,
+			Parent = b,
+		})
+		UI.new("UIStroke", { Color = Color3.fromRGB(10, 30, 60), Thickness = 2, Parent = caption })
+		b.Activated:Connect(function()
+			open(entry[1])
+		end)
+		if entry[1] == "Aquarium" then
+			aquariumBadge = UI.label("", {
+				Name = "Badge",
+				AnchorPoint = Vector2.new(1, 0),
+				Position = UDim2.new(0, 4, 0, -6),
+				Size = UDim2.new(0, 70, 0, 22),
+				BackgroundTransparency = 0,
+				BackgroundColor3 = UI.colors.good,
+				TextXAlignment = Enum.TextXAlignment.Center,
+				Visible = false,
+				Parent = b,
+			})
+			UI.corner(8).Parent = aquariumBadge
+		end
 	end
 
 	panel = UI.new("Frame", {
@@ -394,8 +541,8 @@ end
 
 function Menus.start()
 	while true do
-		task.wait(1)
-		render() -- refresh countdowns
+		task.wait(0.5)
+		tickTimers()
 	end
 end
 
